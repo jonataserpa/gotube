@@ -1,0 +1,1241 @@
+openapi: 3.0.3
+info:
+  title: GoTube API
+  version: 0.1.0
+  description: |
+    Contrato do que a API implementa hoje. Rotas futuras permanecem no roadmap
+    e nas specs, e não aparecem aqui até existirem.
+servers:
+  - url: http://127.0.0.1:18080
+    description: Endereço padrão de desenvolvimento. A porta real é API_ADDR.
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Liveness do processo HTTP
+      description: |
+        Informa que o processo está aceitando requisições. Não consulta
+        PostgreSQL e não representa readiness das dependências.
+      security: []
+      responses:
+        "200":
+          description: O processo está aceitando requisições.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+        "405":
+          description: O método não faz parte do contrato de liveness.
+  /v1/videos:
+    get:
+      operationId: listPublicVideos
+      summary: Lista vídeos públicos publicados
+      description: |
+        Não exige credencial. Cada item é público e publicado. Rascunho,
+        privado, não listado, em exclusão, excluído e bloqueado não entram.
+        A ordem é published_at descendente e, no empate, id descendente.
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Tamanho da página. Ausente vale 12. Acima de 50 ou inválido responde 400.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor opaco da página anterior. Valor irreconhecível responde 400.
+          schema:
+            type: string
+        - name: channel_id
+          in: query
+          required: false
+          description: |
+            Quando presente, restringe a página aos vídeos desse canal. Continua
+            exigindo visibilidade pública e publicação. UUID sem vídeo público
+            publicado responde 200 com página vazia. Valor que não é UUID responde 400.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Página de vídeos públicos publicados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicVideoPage"
+        "400":
+          description: limit, cursor ou channel_id não seguem o contrato. O corpo não é uma página.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                invalidLimit:
+                  value:
+                    error:
+                      code: INVALID_LIMIT
+                      message: limit deve ser um inteiro entre 1 e 50
+                invalidCursor:
+                  value:
+                    error:
+                      code: INVALID_CURSOR
+                      message: cursor não é reconhecido
+                invalidChannel:
+                  value:
+                    error:
+                      code: INVALID_CHANNEL
+                      message: channel_id não é reconhecido
+        "503":
+          description: O PostgreSQL não atendeu a listagem. O corpo não é uma lista vazia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: DATABASE_UNAVAILABLE
+                  message: o catálogo não está disponível
+    post:
+      operationId: createDraft
+      summary: Cria um rascunho privado no canal da conta
+      description: |
+        Exige access token. O vídeo nasce DRAFT, PRIVATE e WAITING_UPLOAD,
+        com duração zero. Não entra na listagem pública. Sem canal da conta,
+        responde 409 e não grava. Campo desconhecido ou título em branco
+        responde 400 e não grava.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DraftInput"
+      responses:
+        "201":
+          description: Rascunho criado no canal da conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Draft"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "409":
+          description: A conta ainda não tem canal. Nenhum vídeo é criado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: CHANNEL_REQUIRED
+                  message: crie um canal antes de enviar um vídeo
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/videos/{id}/upload-sessions:
+    post:
+      operationId: createUploadSession
+      summary: Autoriza um PUT direto ao storage
+      description: |
+        A object key nasce no servidor. O cliente não envia key nem URL.
+        O corpo declara o tamanho previsto. Acima do máximo configurado,
+        a sessão não é criada. Outra conta recebe 403. Vídeo desconhecido
+        recebe 404. Vídeo que não está WAITING_UPLOAD recebe 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadSessionInput"
+      responses:
+        "201":
+          description: Autorização temporária para um único PUT.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSession"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: O vídeo não pertence à conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_FORBIDDEN
+                  message: esse vídeo não é desta conta
+        "404":
+          description: Não há vídeo com esse id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_NOT_FOUND
+                  message: vídeo não encontrado
+        "409":
+          description: O vídeo não está aguardando envio.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_NOT_WAITING
+                  message: esse vídeo não está aguardando envio
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/upload-sessions/{id}/complete:
+    post:
+      operationId: completeUploadSession
+      summary: Confere o objeto e pede processamento uma vez
+      description: |
+        Consulta o storage antes de gravar. Objeto presente e dentro do
+        tamanho autorizado responde 202, marca o vídeo QUEUED e grava um
+        único evento. Objeto ausente ou maior responde 409 e o vídeo
+        permanece WAITING_UPLOAD. Repetir a mesma sessão responde 202 sem
+        outro evento. Não recebe os bytes do arquivo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "202":
+          description: O vídeo ficou na fila, ou a sessão já tinha sido concluída.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: A sessão não pertence à conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_FORBIDDEN
+                  message: esse vídeo não é desta conta
+        "404":
+          description: Não há sessão com esse id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: UPLOAD_SESSION_NOT_FOUND
+                  message: sessão de envio não encontrada
+        "409":
+          description: O objeto não confere. O vídeo continua WAITING_UPLOAD.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: UPLOAD_REJECTED
+                  message: o arquivo enviado não confere com a autorização
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/videos/{id}/processing:
+    get:
+      operationId: readProcessing
+      summary: O dono lê o estado do processamento
+      description: |
+        Devolve o processing_status e, se FAILED, um erro com code e message.
+        Não devolve object key nem URL de mídia. Outra conta recebe 403.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Estado visível para o dono.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessingView"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: O vídeo não pertence à conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_FORBIDDEN
+                  message: esse vídeo não é desta conta
+        "404":
+          description: Não há vídeo com esse id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_NOT_FOUND
+                  message: vídeo não encontrado
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/videos/{id}/retry-processing:
+    post:
+      operationId: retryProcessing
+      summary: Pede de novo o processamento de uma falha
+      description: |
+        Só vale quando o vídeo está FAILED. Responde 202, volta a QUEUED,
+        incrementa a geração e grava um evento. Não muda a publicação.
+        Nos outros estados responde 409 sem gravar.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "202":
+          description: O vídeo voltou para a fila.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: O vídeo não pertence à conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_FORBIDDEN
+                  message: esse vídeo não é desta conta
+        "404":
+          description: Não há vídeo com esse id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: VIDEO_NOT_FOUND
+                  message: vídeo não encontrado
+        "409":
+          description: O vídeo não está em FAILED.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: PROCESSING_NOT_FAILED
+                  message: esse vídeo não falhou
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/auth/register:
+    post:
+      operationId: registerAccount
+      summary: Cria uma conta sem abrir sessão
+      description: Não devolve hash, access token nem cookie de refresh.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "201":
+          description: Conta criada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          description: Senha ou corpo inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: E-mail já cadastrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Banco ou assinatura indisponível. O corpo não confirma a conta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/auth/login:
+    post:
+      operationId: loginAccount
+      summary: Abre uma sessão
+      description: |
+        O access token vai no JSON. O refresh vai só no cookie HttpOnly
+        `gotube_refresh`. E-mail inexistente, senha errada e conta inativa
+        respondem o mesmo 401.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "200":
+          description: Access token e cookie de refresh.
+          headers:
+            Set-Cookie:
+              description: Cookie HttpOnly `gotube_refresh`. O valor não aparece no JSON.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          description: Credencial recusada, sem indicar o motivo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Banco ou assinatura indisponível. Sem access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      summary: Rotaciona o refresh
+      description: |
+        O cookie vigente é revogado e outro é emitido. Reapresentá-lo depois
+        do prazo de corrida revoga a família. Dentro do prazo, a sessão nova
+        permanece.
+      security: []
+      responses:
+        "200":
+          description: Novo access token e novo cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          description: Refresh ausente, desconhecido, expirado ou já rotacionado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Banco ou assinatura indisponível.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/auth/logout:
+    post:
+      operationId: logoutSession
+      summary: Revoga a sessão apresentada
+      description: Outras sessões da mesma conta permanecem. Sem cookie vigente a resposta ainda é 204.
+      security: []
+      responses:
+        "204":
+          description: Cookie limpo e, se ele era vigente, sessão revogada.
+        "503":
+          description: Banco ou assinatura indisponível.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/auth/password/forgot:
+    post:
+      operationId: forgotPassword
+      summary: Registra um pedido de recuperação
+      description: |
+        A resposta pública é a mesma com ou sem conta. O token só entra no
+        corpo quando o sinal de laboratório está ligado e a conta existe.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPassword"
+      responses:
+        "202":
+          description: Pedido aceito sem revelar se a conta existe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgotPasswordResult"
+        "400":
+          description: Corpo inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Banco ou assinatura indisponível.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/auth/password/reset:
+    post:
+      operationId: resetPassword
+      summary: Consome o token e troca a senha
+      description: Revoga todos os refresh da conta. O segundo uso do token falha.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPassword"
+      responses:
+        "204":
+          description: Senha substituída e sessões de refresh revogadas.
+        "400":
+          description: Token inválido ou senha recusada. Senha recusada não consome o token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Banco ou assinatura indisponível. A senha não muda.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/me:
+    get:
+      operationId: readProfile
+      summary: Lê o perfil da conta autenticada
+      description: Exige access token Bearer. Não devolve hash nem refresh.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Identificador, e-mail e nome de exibição.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+    patch:
+      operationId: updateProfile
+      summary: Atualiza o nome de exibição
+      description: |
+        Só aceita `display_name`. Nome vazio, só com espaços ou campo
+        desconhecido responde 400 e não grava. E-mail e senha não mudam aqui.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+      responses:
+        "200":
+          description: Perfil com o nome gravado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/me/channel:
+    get:
+      operationId: readOwnChannel
+      summary: Lê o canal da conta autenticada
+      description: |
+        Sem canal, `channel` é nulo. Não inventa handle. Exige access token Bearer.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Canal da conta ou ausência explícita.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnChannel"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/channels:
+    post:
+      operationId: createChannel
+      summary: Cria o único canal da conta
+      description: |
+        Handle é gravado em minúsculas, com 3 a 30 caracteres de `a-z`, `0-9` e hífen,
+        e não pode ser só hífens. A conta que já tem canal recebe 409.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelCreate"
+      responses:
+        "201":
+          description: Canal criado, com as categorias ativas associadas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelDocument"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "409":
+          description: A conta já tem canal ou o handle já está em uso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                alreadyExists:
+                  value:
+                    error:
+                      code: CHANNEL_ALREADY_EXISTS
+                      message: esta conta já tem um canal
+                handleTaken:
+                  value:
+                    error:
+                      code: HANDLE_ALREADY_REGISTERED
+                      message: esse endereço de canal já está em uso
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/channels/{handle}:
+    parameters:
+      - name: handle
+        in: path
+        required: true
+        description: |
+          Na leitura, o handle público. Na edição, o id UUID do canal.
+        schema:
+          type: string
+    get:
+      operationId: readPublicChannel
+      summary: Lê os metadados públicos de um canal
+      description: |
+        Não exige credencial. Não devolve e-mail nem identificador da conta.
+        Categorias inativas associadas ficam de fora.
+      security: []
+      responses:
+        "200":
+          description: Metadados públicos e categorias ativas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelDocument"
+        "404":
+          $ref: "#/components/responses/ChannelNotFound"
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+    patch:
+      operationId: updateChannel
+      summary: Edita o canal do dono
+      description: |
+        O segmento do caminho é o id UUID. Campos omitidos permanecem.
+        `category_ids` troca o conjunto inteiro; lista vazia remove as associações.
+        Categoria inativa ou desconhecida responde 400 sem gravar. Outra conta
+        ou canal sem dono responde 403.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelPatch"
+      responses:
+        "200":
+          description: Canal atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelDocument"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/ChannelForbidden"
+        "404":
+          $ref: "#/components/responses/ChannelNotFound"
+        "409":
+          description: Handle já usado por outro canal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: HANDLE_ALREADY_REGISTERED
+                  message: esse endereço de canal já está em uso
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+  /v1/categories:
+    get:
+      operationId: listActiveCategories
+      summary: Lista categorias ativas
+      description: Não exige credencial. Categoria inativa não aparece. Sem banco, 503 e o corpo não é uma lista de sucesso.
+      security: []
+      responses:
+        "200":
+          description: Categorias ativas, ordenadas por nome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryPage"
+        "503":
+          $ref: "#/components/responses/AccountUnavailable"
+components:
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+    PublicVideoPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicVideo"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor opaco da próxima página. Nulo na última página.
+    PublicVideo:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - duration_seconds
+        - thumbnail_url
+        - channel
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        duration_seconds:
+          type: integer
+          minimum: 0
+        thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+        channel:
+          $ref: "#/components/schemas/PublicChannel"
+    PublicChannel:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - handle
+      properties:
+        name:
+          type: string
+        handle:
+          type: string
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum:
+                - INVALID_LIMIT
+                - INVALID_CURSOR
+                - INVALID_CHANNEL
+                - DATABASE_UNAVAILABLE
+                - AUTH_UNAVAILABLE
+                - VALIDATION_ERROR
+                - EMAIL_ALREADY_REGISTERED
+                - INVALID_CREDENTIALS
+                - INVALID_REFRESH
+                - INVALID_RESET_TOKEN
+                - UNAUTHENTICATED
+                - CHANNEL_FORBIDDEN
+                - CHANNEL_NOT_FOUND
+                - CHANNEL_ALREADY_EXISTS
+                - HANDLE_ALREADY_REGISTERED
+                - CHANNEL_REQUIRED
+                - VIDEO_FORBIDDEN
+                - VIDEO_NOT_FOUND
+                - VIDEO_NOT_WAITING
+                - UPLOAD_REJECTED
+                - UPLOAD_SESSION_NOT_FOUND
+                - PROCESSING_NOT_FAILED
+            message:
+              type: string
+    Credentials:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+          minLength: 8
+    Account:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+    Session:
+      type: object
+      additionalProperties: false
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - user
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum:
+            - Bearer
+        expires_in:
+          type: integer
+          example: 900
+        user:
+          $ref: "#/components/schemas/Account"
+    ForgotPassword:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email:
+          type: string
+    ForgotPasswordResult:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        reset_token:
+          type: string
+          description: Presente só no laboratório, e só quando a conta existe.
+    ResetPassword:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - password
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 8
+    Profile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - display_name
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+          description: Nulo até a conta gravar um nome de exibição.
+    ProfileUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+    Category:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - slug
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+    CategoryPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    ChannelDocument:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - handle
+        - name
+        - description
+        - categories
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    OwnChannel:
+      type: object
+      additionalProperties: false
+      required:
+        - channel
+      properties:
+        channel:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/ChannelDocument"
+    ChannelCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - handle
+        - name
+      properties:
+        handle:
+          type: string
+          minLength: 3
+          maxLength: 30
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 500
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    ChannelPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        handle:
+          type: string
+          minLength: 3
+          maxLength: 30
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 500
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    DraftInput:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+    Draft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - duration_seconds
+        - visibility
+        - publication_status
+        - processing_status
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        duration_seconds:
+          type: integer
+          minimum: 0
+        visibility:
+          type: string
+          enum:
+            - PRIVATE
+        publication_status:
+          type: string
+          enum:
+            - DRAFT
+        processing_status:
+          type: string
+          enum:
+            - WAITING_UPLOAD
+    UploadSessionInput:
+      type: object
+      additionalProperties: false
+      required:
+        - declared_size
+      properties:
+        declared_size:
+          type: integer
+          format: int64
+          minimum: 1
+    UploadSession:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - upload_url
+        - expires_at
+        - max_bytes
+      properties:
+        id:
+          type: string
+          format: uuid
+        upload_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+        max_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+    UploadResult:
+      type: object
+      additionalProperties: false
+      required:
+        - processing_status
+      properties:
+        processing_status:
+          type: string
+          enum:
+            - QUEUED
+    ProcessingView:
+      type: object
+      additionalProperties: false
+      required:
+        - processing_status
+      properties:
+        processing_status:
+          type: string
+          enum:
+            - WAITING_UPLOAD
+            - QUEUED
+            - PROCESSING
+            - READY
+            - FAILED
+        error:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    EmptyObject:
+      type: object
+      additionalProperties: false
+  responses:
+    Unauthenticated:
+      description: Access token ausente ou inválido.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: é preciso entrar novamente
+    ValidationError:
+      description: Corpo recusado. Nada é gravado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: os dados não são válidos
+    ChannelForbidden:
+      description: A conta não é dona desse canal.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: CHANNEL_FORBIDDEN
+              message: esse canal não é desta conta
+    ChannelNotFound:
+      description: Não há canal com esse identificador ou handle.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: CHANNEL_NOT_FOUND
+              message: canal não encontrado
+    AccountUnavailable:
+      description: O PostgreSQL não atendeu a rota. O corpo não confirma alteração.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: DATABASE_UNAVAILABLE
+              message: o serviço de conta não está disponível
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token da sessão. Não é o cookie de refresh.

@@ -1,0 +1,12 @@
+---
+alwaysApply: false
+---
+
+Nesta tarefa:
+1. Explique o problema e o conceito necessário em português.
+2. Diga onde o código executa: browser, Next.js, Go, worker ou infraestrutura.
+3. Implemente uma fatia pequena com começo e fim observáveis.
+4. Explique memória/concorrência quando pertinentes, sem analogias enganosas.
+5. Mostre uma falha e sua recuperação.
+6. Execute verificação relevante e relate o resultado real.
+7. Proponha um exercício curto sem avançar para outra funcionalidade.

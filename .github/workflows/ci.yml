@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.1-alpine
+        env:
+          POSTGRES_DB: gotube
+          POSTGRES_USER: gotube
+          POSTGRES_PASSWORD: gotube
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gotube -d gotube"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://gotube:gotube@127.0.0.1:5432/gotube?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  web:
+    name: Next.js
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  compose:
+    name: Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Render Compose
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/compose/compose.yaml --env-file .env config --quiet

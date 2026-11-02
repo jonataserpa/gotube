@@ -1,0 +1,16 @@
+---
+description: Upload, reprodução e lives do GoTube
+globs: internal/video/**,internal/live/**,web/src/features/upload/**,web/src/features/player/**,web/src/features/live/**
+alwaysApply: false
+---
+
+- Distinguir bytes enviados, processamento, publicação e visibilidade.
+- Upload usa object key e autorização gerados no Go.
+- Não enviar Bearer da API para URL assinada do storage.
+- Não registrar URL assinada nem chave de publicação de live.
+- Autorização de mídia cobre manifestos, variantes e segmentos.
+- Playback público pode emitir autorização curta a visitante; privado exige permissão.
+- Cancelar request no browser não comprova rollback do servidor.
+- Retry respeita idempotência, versão e geração do recurso.
+- Limitar uploads, partes e processos FFmpeg; liberar recursos.
+- Encerrar live deve afetar o servidor de mídia e negar reconexão revogada.

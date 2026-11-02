@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Escreva documentação e explicações em português brasileiro.
+  Projeto GoTube: plataforma educacional de vídeos e lives.
+  Go na raiz; Next.js App Router e TypeScript em web/.
+  PostgreSQL, RabbitMQ, object storage e FFmpeg entram conforme a etapa.
+  Monólito modular com executáveis API, worker e outbox.
+  Go é a autoridade de negócio; frontend não acessa tabelas diretamente.
+  Instruções: AGENTS.md, internal/AGENTS.md e web/AGENTS.md.
+  Curso: docs/course/GoTube_Curso_Completo.md; consulte só seções pertinentes.
+  Produto e sequência: docs/product.md e docs/roadmap.md.
+  Contrato HTTP: api/openapi.yaml, criado durante o bootstrap.
+  Decisões: docs/adr/. Curso/roadmap não provam implementação concluída.
+
+rules:
+  proposal:
+    - Definir objetivo, escopo e itens fora de escopo.
+    - Identificar impacto em Go, Next.js, dados e operação.
+  specs:
+    - Usar requisitos verificáveis e cenários WHEN/THEN concretos.
+    - Incluir autorização e falhas relevantes ao requisito.
+    - Distinguir capacidade proposta de já implementada.
+  design:
+    - Referenciar ADRs e explicar divergências antes de implementar.
+    - Descrever contratos, estados e consistência quando aplicável.
+  tasks:
+    - Dividir em entregas pequenas com critérios observáveis.
+    - Incluir integração e verificações pertinentes.
+    - Não exigir infraestrutura de módulos futuros no bootstrap.

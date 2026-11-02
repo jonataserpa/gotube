@@ -1,0 +1,12 @@
+---
+description: Consistência entre contratos Go e Next.js
+globs: api/**,internal/**,web/src/lib/api/**,web/src/features/**
+alwaysApply: false
+---
+
+- Consulte api/openapi.yaml antes de alterar rota, DTO ou payload; se ausente, crie apenas o contrato da etapa autorizada.
+- Identifique consumidores Go e Next afetados; não invente endpoint para satisfazer UI.
+- Atualize fonte do contrato e regenere tipos; não edite gerados manualmente.
+- Diferencie proposta de comportamento implementado.
+- Mudança incompatível exige estratégia de migração.
+- Teste sucesso, erro e autorização relevantes.

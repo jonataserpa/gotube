@@ -1,0 +1,8 @@
+{
+  "name": "gotube-openspec-tooling",
+  "private": true,
+  "description": "CLI local versionada; executar scripts/setup-openspec.sh",
+  "devDependencies": {
+    "@fission-ai/openspec": "1.14.1"
+  }
+}

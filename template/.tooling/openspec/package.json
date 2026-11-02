@@ -1,0 +1,5 @@
+{
+  "name": "gotube-openspec-tooling",
+  "private": true,
+  "description": "CLI local versionada; executar scripts/setup-openspec.sh"
+}

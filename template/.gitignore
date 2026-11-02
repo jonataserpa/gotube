@@ -1,0 +1,31 @@
+# Segredos e ambientes locais
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+
+# Dependências e builds
+**/node_modules/
+web/.next/
+web/out/
+dist/
+bin/
+coverage/
+coverage.out
+*.test
+*.prof
+
+# Dados locais, mídia e resultados
+.local/
+.worktrees/
+tmp/
+uploads/
+storage/
+web/test-results/
+web/playwright-report/
+*.log
+.DS_Store
+
+# Manter lockfiles, regras Cursor e OpenSpec no Git.

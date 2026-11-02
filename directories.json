@@ -1,0 +1,23 @@
+[
+  "cmd/api",
+  "cmd/worker",
+  "cmd/outbox",
+  "cmd/gotube",
+  "internal/identity",
+  "internal/channel",
+  "internal/video",
+  "internal/social",
+  "internal/live",
+  "internal/notification",
+  "internal/platform",
+  "db/migrations",
+  "db/queries",
+  "api/events",
+  "api/proto",
+  "deploy/compose",
+  "deploy/kubernetes",
+  "docs/runbooks",
+  "openspec/specs",
+  "openspec/changes",
+  ".github/workflows"
+]
